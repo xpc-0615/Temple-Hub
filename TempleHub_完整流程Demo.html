@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TempleHub 完整流程 Demo</title>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="/config.js"></script>
+  <style>
+    :root { --wine:#8b1a2b; --ink:#241f1c; --paper:#f8f2e8; --line:#e2d5c2; --green:#176746; }
+    * { box-sizing:border-box } body { margin:0; background:#eee6da; color:var(--ink); font-family:"Noto Sans TC","Microsoft JhengHei",sans-serif; }
+    .shell { max-width:480px; min-height:100vh; margin:auto; background:#fffaf3; box-shadow:0 0 30px #5e443522; }
+    header { padding:18px 20px; background:var(--wine); color:#fff9ef; display:flex; justify-content:space-between; align-items:center; }
+    h1 { margin:0; font-size:20px } header small { opacity:.8 } main { padding:18px; } .hidden { display:none!important }
+    .tag { display:inline-block; padding:4px 8px; border-radius:99px; background:#f5e5c8; color:#76551c; font-size:12px; }
+    .chat { display:flex; flex-direction:column; gap:12px; min-height:255px; padding:12px 0; }
+    .bubble { max-width:88%; padding:12px 14px; border-radius:18px; line-height:1.55; background:#eee5d7; align-self:flex-start; }
+    .bubble.me { background:var(--wine); color:#fff; align-self:flex-end; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:14px; padding:15px; margin:12px 0; box-shadow:0 2px 7px #45230a0c; }
+    .card h2,.card h3 { margin:0 0 8px; } .card h2 { font-size:19px; } .card h3 { font-size:16px; }
+    .choice, button { appearance:none; border:0; border-radius:10px; padding:12px 14px; font:inherit; cursor:pointer; }
+    button.primary { color:white; background:var(--wine); width:100%; font-weight:700; } button.secondary { color:var(--wine); background:#fff; border:1px solid var(--wine); width:100%; font-weight:700; }
+    button.green { color:#fff; background:var(--green); width:100%; font-weight:700; } .choice { border:1px solid var(--line); background:#fffdf9; width:100%; text-align:left; margin:7px 0; }
+    .choice strong { display:block; } .choice small,.muted { color:#766d65; line-height:1.5; } .steps { display:flex; gap:4px; margin:10px 0 18px; }
+    .steps span { flex:1; text-align:center; font-size:12px; padding:7px 2px; border-bottom:3px solid #d8cab9; color:#786d62; } .steps span.on { border-color:var(--wine); color:var(--wine); font-weight:700; }
+    input,select { width:100%; padding:11px; border:1px solid #cfc0ad; border-radius:8px; margin:5px 0 12px; font:inherit; background:#fff; }
+    .row { display:flex; gap:10px; } .row > * { flex:1 } .notice { font-size:13px; padding:10px; background:#fff1d8; border-radius:9px; line-height:1.5; }
+    #qr { margin:16px auto; display:flex; justify-content:center; min-height:180px; align-items:center; } .code { text-align:center; font-family:ui-monospace,monospace; font-size:18px; font-weight:bold; letter-spacing:1px; }
+    .success { border-left:5px solid var(--green); } .status { text-align:center; font-size:27px; margin:12px; } footer { padding:16px 20px 28px; color:#776c61; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header><div><h1>TempleHub</h1><small id="headerSub">信徒端 Demo</small></div><span>⛩</span></header>
+    <main>
+      <section id="customer">
+        <div class="steps"><span class="on">1 詢問</span><span id="s2">2 備料</span><span id="s3">3 參拜</span><span id="s4">4 還願</span></div>
+        <div class="chat" id="chat"><div class="bubble">你好，我是 TempleHub。告訴我你想祈求什麼，我會依已驗證的宮廟資料，提供參拜與準備建議。</div></div>
+        <div id="askBox"><button class="choice" onclick="askExam()"><strong>下週要考試，想求心安</strong><small>示範 AI 對話：考試／文昌帝君</small></button><button class="choice" onclick="askExam()"><strong>我想替孩子準備考試祈福</strong><small>使用相同的已驗證資料庫</small></button></div>
+        <div id="recommend" class="hidden">
+          <div class="card"><span class="tag">已驗證資料示範</span><h2>台北市文昌宮</h2><p>主祀文昌帝君；考生可依廟方公開資訊準備准考證與供品，或誠心隨緣參拜。</p><p class="muted">示範資料，非 TempleHub 合作聲明。</p></div>
+          <button class="primary" onclick="showPrep()">開始準備供品與參拜</button>
+        </div>
+        <div id="prep" class="hidden">
+          <div class="card"><h2>你的考試祈福清單</h2><p>蔥、芹菜、粽子、包種茶、准考證影本</p><p class="muted">清單為常見民俗建議；實際以廟方規範為準。</p></div>
+          <button class="choice" onclick="chooseMode('store')"><strong>📍 到合作店家備料</strong><small>預約後到店取貨，掃碼享示範優惠</small></button>
+          <button class="choice" onclick="chooseMode('online')"><strong>🛒 線上預約備料</strong><small>Demo 會建立預約，不會收取真實款項</small></button>
+        </div>
+        <div id="merchantPick" class="hidden"><h2>選擇示範合作店家</h2><p class="notice">以下為公開資料中的潛在合作對象，尚未建立合作關係。</p>
+          <button class="choice" onclick="book('柏輝金紙店')"><strong>蘭州市場．柏輝金紙店</strong><small>供應祭祀用品與部分供品｜昌吉街 55 號</small></button>
+          <button class="choice" onclick="book('老大生香燭金紙舖')"><strong>老大生香燭金紙舖</strong><small>南門市場｜祭祀用品與香品</small></button>
+          <button class="choice" onclick="book('吉祥堂香舖')"><strong>吉祥堂香舖</strong><small>東門市場｜香品與金紙組合</small></button>
+        </div>
+        <div id="voucher" class="hidden"><div class="card"><span class="tag">到店核銷憑證</span><h2 id="merchantName"></h2><p>請向店家出示此 QR Code。店家掃描後會核銷本次預約與示範折扣。</p><div id="qr"></div><div id="codeText" class="code"></div><p class="muted">無法掃碼時，店家可輸入上方代碼。</p></div><button class="secondary" onclick="openRole('merchant')">切到店家核銷端 Demo</button></div>
+        <div id="templeCheckin" class="hidden"><div class="card"><span class="tag">店家已核銷</span><h2>下一站：台北市文昌宮</h2><p>抵達後掃描廟方展示 QR，完成本次參拜旅程。</p><button class="green" onclick="checkinTemple()">模擬掃描廟方 QR 並完成參拜</button></div></div>
+        <div id="vow" class="hidden"><div class="card success"><div class="status">✓</div><h2>參拜旅程已完成</h2><p>是否要把「考試順利後回來還願」記下來？</p><label>提醒日期</label><input id="remindDate" type="date"><button class="primary" onclick="saveVow()">設定 LINE 還願提醒</button></div></div>
+        <div id="done" class="hidden"><div class="card success"><div class="status">✓</div><h2>已記下你的還願心願</h2><p id="doneText"></p><p class="muted">正式版會由 Messaging API 在提醒日對已加入 OA 且同意提醒的使用者發送推播。</p></div><button class="secondary" onclick="location.reload()">重新跑一次 Demo</button></div>
+      </section>
+      <section id="merchant" class="hidden"><h2>店家核銷端</h2><p class="muted">Demo：可由店員輸入信徒 QR 下方的代碼。</p><label>核銷碼</label><input id="redeemCode" placeholder="例如 TH-ABC123"><button class="green" onclick="redeem()">核銷預約</button><div id="redeemResult"></div><hr><button class="secondary" onclick="openRole('customer')">回到信徒端</button></section>
+    </main>
+    <footer>TempleHub 競賽技術 Demo｜店家與宮廟名稱為公開資訊的示範資料，並不代表合作關係。</footer>
+  </div>
+  <script>
+    let bookingCode=''; let bookingMerchant=''; let lineUserId='demo-user'; const byId=id=>document.getElementById(id);
+    async function initLiff(){
+      const liffId=window.TempleHubConfig?.liffId;
+      if(!liffId || !window.liff) return;
+      try { await liff.init({liffId}); if(liff.isLoggedIn()) { lineUserId=(await liff.getProfile()).userId; } }
+      catch(e) { console.info('LIFF preview mode',e.message); }
+    }
+    initLiff();
+    const hide=id=>byId(id).classList.add('hidden'); const show=id=>byId(id).classList.remove('hidden');
+    function askExam(){ byId('chat').innerHTML += '<div class="bubble me">下週要考試，想求心安</div><div class="bubble">我建議向文昌帝君祈求學業與考運。依台北市文昌宮公開資訊，我先為你整理了供品與參拜準備。</div>'; hide('askBox'); show('recommend'); }
+    function showPrep(){ hide('recommend'); show('prep'); byId('s2').classList.add('on'); }
+    function chooseMode(mode){ hide('prep'); if(mode==='store') show('merchantPick'); else book('TempleHub 線上備料示範'); }
+    async function book(name){ bookingMerchant=name; bookingCode='TH-'+Math.random().toString(36).slice(2,8).toUpperCase(); try { const r=await fetch('/api/bookings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:bookingCode,merchant:name,temple:'台北市文昌宮',lineUserId,items:['蔥','芹菜','粽子','包種茶']})}); if(r.ok){const j=await r.json();bookingCode=j.code||bookingCode;} } catch(e) { localStorage.setItem('templehub:'+bookingCode,JSON.stringify({merchant:name,status:'reserved'})); } hide('merchantPick'); byId('merchantName').textContent=name; byId('codeText').textContent=bookingCode; show('voucher'); new QRCode(byId('qr'),{text:bookingCode,width:180,height:180,colorDark:'#241f1c',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}); }
+    function openRole(role){ hide('customer'); hide('merchant'); show(role); byId('headerSub').textContent=role==='merchant'?'店家核銷端 Demo':'信徒端 Demo'; }
+    async function redeem(){ const code=byId('redeemCode').value.trim().toUpperCase(); let ok=false, merchant=''; try { const r=await fetch('/api/redeem',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code})}); const j=await r.json(); ok=!!j.ok; merchant=j.merchant||''; } catch(e) { const j=JSON.parse(localStorage.getItem('templehub:'+code)||'null'); ok=!!j && j.status==='reserved'; merchant=j?.merchant||''; if(ok){j.status='redeemed';localStorage.setItem('templehub:'+code,JSON.stringify(j));} } byId('redeemResult').innerHTML=ok?'<div class="card success"><h3>✓ 核銷成功</h3><p>'+merchant+' 已確認備料預約。示範優惠已套用。</p></div>':'<div class="card"><h3>找不到可用核銷碼</h3><p>請回信徒端建立新的預約；每個碼只能核銷一次。</p></div>'; if(ok&&code===bookingCode){ hide('voucher'); show('templeCheckin'); byId('s3').classList.add('on'); } }
+    async function checkinTemple(){ try { await fetch('/api/checkin',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:bookingCode,temple:'台北市文昌宮'})}); } catch(e) {} hide('templeCheckin'); show('vow'); byId('s4').classList.add('on'); const d=new Date();d.setDate(d.getDate()+30);byId('remindDate').value=d.toISOString().slice(0,10); }
+    async function saveVow(){ const date=byId('remindDate').value; localStorage.setItem('templehub:vow',JSON.stringify({date,code:bookingCode,merchant:bookingMerchant})); try { await fetch('/api/vows',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:bookingCode,date,lineUserId,temple:'台北市文昌宮'})}); } catch(e) {} hide('vow'); show('done'); byId('doneText').textContent='提醒日：'+date+'。我們會提醒你回到台北市文昌宮還願。'; }
+  </script>
+</body>
+</html>
