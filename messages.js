@@ -12,4 +12,16 @@ const offerings=[
  {id:'rice',name:'粽子',note:'常見考試祈福供品；請依宮廟規範準備。',options:[{id:'rice-a',name:'市場粽子店 A',price:45},{id:'rice-b',name:'手作粽子店 B',price:55}]},
  {id:'fruit',name:'水果',note:'可準備一般敬果，份量依個人需求。',options:[{id:'fruit-a',name:'雙連水果店 A',price:100},{id:'fruit-b',name:'市場水果店 B',price:120}]}
 ];
-module.exports={templeCards,shopCards,couponCards,temples,shops,offerings};
+// Each item has one settlement price across all eligible demonstration merchants.
+for(const item of offerings){item.price=item.options[0].price;for(const option of item.options)option.price=item.price;}
+const bundle={id:'exam',name:'考試祈福禮包',regularPrice:205,price:185,discount:20};
+function redeemItem(booking,itemId,merchantId){
+ const item=booking?.items?.find(i=>i.itemId===itemId);
+ if(!item)throw Error('訂單沒有此供品');
+ if(!item.eligibleMerchantIds?.includes(merchantId))throw Error('這間店家不能兌換此供品');
+ if(item.redeemedAt)throw Error('此供品已兌換，不能重複核銷');
+ item.redeemedAt=new Date().toISOString();item.redeemedBy=merchantId;
+ booking.status=booking.items.every(i=>i.redeemedAt)?'redeemed':'partially_redeemed';
+ return item;
+}
+module.exports={templeCards,shopCards,couponCards,temples,shops,offerings,bundle,redeemItem};

@@ -4,7 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const {templeCards,shopCards,couponCards,shops,offerings} = require('./messages');
+const {templeCards,shopCards,couponCards,shops,offerings,bundle,redeemItem} = require('./messages');
 const root = __dirname;
 const dbFile = path.join(root, 'data', 'demo-state.json');
 fs.mkdirSync(path.dirname(dbFile), { recursive: true });
@@ -45,7 +45,8 @@ async function verifiedUser(req){
 }
 
 http.createServer(async (req, res) => {
-  if(req.method==='GET' && req.url==='/api/offerings') return send(res,200,{items:offerings});
+  if(req.method==='GET' && req.url==='/api/offerings') return send(res,200,{items:offerings,bundle});
+  if(req.method==='POST' && req.url==='/api/booking-status') {const user=await verifiedUser(req);const {code}=await body(req);const b=readDb().bookings[code];if(!user||!b||b.lineUserId!==user)return send(res,403,{error:'無法查看此訂單'});return send(res,200,{items:b.items,status:b.status,total:b.total});}
   if(req.method==='GET' && req.url==='/health') return send(res,200,{ok:true,version:'chat-carousel-1'});
   if (req.method === 'GET' && req.url === '/config.js') return send(res, 200, `window.TempleHubConfig=${JSON.stringify({liffId:process.env.LIFF_ID || ''})};`, 'application/javascript; charset=utf-8');
   if (req.method === 'POST' && req.url === '/callback') {
@@ -75,17 +76,19 @@ http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/api/bookings') {
     const user=await verifiedUser(req);if(!user) return send(res,401,{error:'請從 LINE 登入後預約'});
     const item = await body(req); item.lineUserId=user; item.code='TH-'+crypto.randomBytes(12).toString('hex').toUpperCase(); const db = readDb();
-    if(!Array.isArray(item.selections)||!item.selections.length) return send(res,400,{error:'請至少選擇一項供品與店家'});
-    const resolved=[];
-    for(const selection of item.selections){const product=offerings.find(p=>p.id===selection.itemId);const option=product?.options.find(o=>o.id===selection.optionId);if(!option||resolved.some(p=>p.itemId===product.id))return send(res,400,{error:'供品或店家選擇無效'});resolved.push({itemId:product.id,item:product.name,...option});}
-    item.items=resolved;item.total=resolved.reduce((sum,p)=>sum+p.price,0);item.merchant=Array.from(new Set(resolved.map(p=>p.name))).join('、');
+    if(item.bundleId!==bundle.id)return send(res,400,{error:'請選擇有效的禮包'});
+    item.items=offerings.map(p=>({itemId:p.id,item:p.name,price:p.price,eligibleMerchantIds:p.options.map(o=>o.id),redeemedAt:null,redeemedBy:null}));
+    item.total=bundle.price;item.regularPrice=bundle.regularPrice;item.merchant='任一符合資格的合作示範店';item.paymentStatus='demo_no_charge';delete item.selections;
     db.bookings[item.code] = { ...item, status:'reserved', createdAt:new Date().toISOString() }; writeDb(db); return send(res, 201, { code:item.code, status:'reserved' });
   }
   if (req.method === 'POST' && req.url === '/api/redeem') {
-    if(!process.env.MERCHANT_KEY || req.headers['x-merchant-key']!==process.env.MERCHANT_KEY) return send(res,403,{error:'需要店家核銷權限'});
-    const {code} = await body(req); const db = readDb(); const booking = db.bookings[code];
-    if (!booking || booking.status !== 'reserved') return send(res, 404, {ok:false});
-    booking.status='redeemed'; booking.redeemedAt=new Date().toISOString(); writeDb(db); return send(res, 200, {ok:true, merchant:booking.merchant});
+    const {code,itemId,merchantId}=await body(req);
+    let keys={};try{keys=JSON.parse(process.env.MERCHANT_KEYS||'{}');}catch{}
+    const expected=keys[merchantId],provided=req.headers['x-merchant-key'];
+    if(!expected||!provided||Buffer.byteLength(expected)!==Buffer.byteLength(provided)||!crypto.timingSafeEqual(Buffer.from(expected),Buffer.from(provided)))return send(res,403,{error:'店家身分或核銷密碼不正確'});
+    // No await between read, check and write: atomic within this single server process.
+    const db=readDb();const booking=db.bookings[code];
+    try{const item=redeemItem(booking,itemId,merchantId);writeDb(db);return send(res,200,{ok:true,item:item.item,status:booking.status});}catch(e){return send(res,409,{error:e.message});}
   }
   if (req.method === 'POST' && req.url === '/api/checkin') {
     const user=await verifiedUser(req); if(!user) return send(res,401,{error:'請先在 LINE 登入'});
