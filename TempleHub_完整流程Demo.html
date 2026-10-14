@@ -82,18 +82,29 @@
   </script>
 <script>
   // Live LINE operations: every successful screen follows a confirmed server response.
+  let offeringCatalog=[],selections={};
+  async function renderOfferings(){
+    try{const r=await fetch('/api/offerings');if(!r.ok)throw Error('供品清單讀取失敗');offeringCatalog=(await r.json()).items;
+    byId('prep').replaceChildren();const title=document.createElement('h2');title.textContent='考試祈福・供品清單';byId('prep').append(title);
+    const note=document.createElement('p');note.className='notice';note.textContent='各店家、價格均為虛構示範。可自備或略過供品，依廟方規範隨緣準備。';byId('prep').append(note);
+    offeringCatalog.forEach(item=>{const card=document.createElement('div');card.className='card';const h=document.createElement('h3');h.textContent=item.name;card.append(h);const p=document.createElement('p');p.className='muted';p.textContent=item.note;card.append(p);
+      [{id:'',name:'自備／略過',price:0},...item.options].forEach(option=>{const label=document.createElement('label');label.style.cssText='display:flex;gap:10px;align-items:center;padding:12px 0;border-top:1px solid #eee';const radio=document.createElement('input');radio.type='radio';radio.name=item.id;radio.value=option.id;radio.checked=!option.id;radio.style.cssText='width:auto;margin:0';radio.onchange=()=>{if(option.id)selections[item.id]=option.id;else delete selections[item.id];updateTotal();};const text=document.createElement('span');text.textContent=option.name+(option.id?' · NT$'+option.price:'');label.append(radio,text);card.append(label);});byId('prep').append(card);});
+    const total=document.createElement('p');total.id='offeringTotal';byId('prep').append(total);const button=document.createElement('button');button.className='primary';button.textContent='確認清單並建立示範預約';button.onclick=()=>book('供品預約');byId('prep').append(button);updateTotal();
+    }catch(e){problem(e);}
+  }
+  function updateTotal(){const chosen=offeringCatalog.flatMap(item=>item.options.filter(o=>o.id===selections[item.id]));byId('offeringTotal').textContent='已選 '+chosen.length+' 項 · 合計 NT$'+chosen.reduce((sum,o)=>sum+o.price,0)+'（示範、不扣款）';}
   async function requestApi(url,data,extra={}) {
     const token=window.liff?.isLoggedIn()?liff.getAccessToken():'';
     const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json',Authorization:'Bearer '+token,...extra},body:JSON.stringify(data)});
     const result=await r.json();if(!r.ok) throw new Error(result.error||'操作失敗');return result;
   }
   function problem(error){byId('headerSub').textContent=error.message;}
-  async function book(name){try{const result=await requestApi('/api/bookings',{merchant:name,temple:'台北市文昌宮',items:['蔥','芹菜','粽子','包種茶']});bookingMerchant=name;bookingCode=result.code;sessionStorage.setItem('bookingCode',bookingCode);hide('prep');hide('merchantPick');byId('merchantName').textContent=name;byId('codeText').textContent=bookingCode;byId('qr').replaceChildren();new QRCode(byId('qr'),{text:bookingCode,width:180,height:180});show('voucher');}catch(e){problem(e);}}
+  async function book(name){try{const selected=Object.entries(selections).map(([itemId,optionId])=>({itemId,optionId}));if(!selected.length)throw Error('請至少選擇一項供品與店家');const result=await requestApi('/api/bookings',{temple:'台北市文昌宮',selections:selected});bookingMerchant=name;bookingCode=result.code;sessionStorage.setItem('bookingCode',bookingCode);hide('prep');hide('merchantPick');byId('merchantName').textContent='供品預約・展示核銷';byId('codeText').textContent=bookingCode;byId('qr').replaceChildren();new QRCode(byId('qr'),{text:bookingCode,width:180,height:180});show('voucher');}catch(e){problem(e);}}
   async function redeem(){try{const key=prompt('請輸入店家核銷密碼');if(!key)return;const code=byId('redeemCode').value.trim();const result=await requestApi('/api/redeem',{code},{'x-merchant-key':key});byId('redeemResult').textContent='核銷成功：'+result.merchant;if(code===bookingCode){hide('voucher');show('templeCheckin');}}catch(e){problem(e);}}
   async function checkinTemple(){try{const result=await requestApi('/api/checkin',{code:bookingCode});hide('templeCheckin');show('vow');byId('s4').classList.add('on');byId('remindDate').value=new Date(Date.now()+30*86400000).toISOString().slice(0,10);byId('headerSub').textContent=result.couponSent?'參拜完成，優惠已送到 LINE 聊天室':'參拜已完成；聊天室優惠發送狀態待確認';}catch(e){problem(e);}}
   async function saveVow(){try{const date=byId('remindDate').value;await requestApi('/api/vows',{code:bookingCode,date,temple:'台北市文昌宮'});hide('vow');show('done');byId('doneText').textContent='已儲存提醒日期：'+date;}catch(e){problem(e);}}
   async function startLive(){const id=window.TempleHubConfig?.liffId;if(!id)return;try{await liff.init({liffId:id});if(!liff.isLoggedIn()){liff.login();return;}hide('chat');hide('askBox');show('prep');byId('headerSub').textContent='供品準備與參拜';bookingCode=sessionStorage.getItem('bookingCode')||'';const shop=new URLSearchParams(location.search).get('shop');if(shop)bookingMerchant=shop;}catch(e){problem(e);}}
-  startLive();
+  renderOfferings();startLive();
 </script>
 </body>
 </html>

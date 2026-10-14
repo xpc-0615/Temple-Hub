@@ -7,4 +7,9 @@ function carousel(items, title, action) {
 function templeCards(){return carousel(temples,'考試祈福宮廟推薦',{label:'選擇這間宮廟',data:item=>'temple='+item.id});}
 function shopCards(){return carousel(shops,'供品店家推薦',{label:'選擇這間店家',data:item=>'shop='+item.id});}
 function couponCards(){return carousel([{id:'cafe',name:'參拜後・街角茶飲示範店',address:'宮廟周邊商圈（虛構示範）',description:'完成參拜專屬：飲品折 NT$10。無真實兌換效力。'},{id:'food',name:'參拜後・在地餐館示範店',address:'宮廟周邊商圈（虛構示範）',description:'完成參拜專屬：餐點九折。無真實兌換效力。'}],'參拜完成，領取附近商家示範優惠',{label:'領取示範優惠',data:item=>'coupon='+item.id});}
-module.exports={templeCards,shopCards,couponCards,temples,shops};
+const offerings=[
+ {id:'tea',name:'包種茶',note:'常見民俗取「包中」之意，非必要供品。',options:[{id:'tea-a',name:'雙連茶行 A',price:60},{id:'tea-b',name:'在地茶行 B',price:75}]},
+ {id:'rice',name:'粽子',note:'常見考試祈福供品；請依宮廟規範準備。',options:[{id:'rice-a',name:'市場粽子店 A',price:45},{id:'rice-b',name:'手作粽子店 B',price:55}]},
+ {id:'fruit',name:'水果',note:'可準備一般敬果，份量依個人需求。',options:[{id:'fruit-a',name:'雙連水果店 A',price:100},{id:'fruit-b',name:'市場水果店 B',price:120}]}
+];
+module.exports={templeCards,shopCards,couponCards,temples,shops,offerings};
