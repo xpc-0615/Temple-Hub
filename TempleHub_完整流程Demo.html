@@ -32,9 +32,9 @@
 </head>
 <body>
   <div class="shell">
-    <header><div><h1>TempleHub</h1><small id="headerSub">信徒端 Demo</small></div><span>⛩</span></header>
+    <header><div><h1>TempleHub</h1><small id="headerSub">載入禮包中…</small></div><span>⛩</span></header>
     <main>
-      <section id="customer">
+      <section id="customer" class="hidden">
         <div class="steps"><span class="on">1 詢問</span><span id="s2">2 備料</span><span id="s3">3 參拜</span><span id="s4">4 還願</span></div>
         <div class="chat" id="chat"><div class="bubble">你好，我是 TempleHub。告訴我你想祈求什麼，我會依已驗證的宮廟資料，提供參拜與準備建議。</div></div>
         <div id="askBox"><button class="choice" onclick="askExam()"><strong>下週要考試，想求心安</strong><small>示範 AI 對話：考試／文昌帝君</small></button><button class="choice" onclick="askExam()"><strong>我想替孩子準備考試祈福</strong><small>使用相同的已驗證資料庫</small></button></div>
@@ -105,7 +105,10 @@
   async function prepareMerchant(){const r=await fetch('/api/offerings');const {items}=await r.json();const label=document.createElement('label');label.textContent='店家示範身分（仍須輸入對應店家密碼）';const select=document.createElement('select');select.id='merchantIdentity';items.forEach(item=>item.options.forEach(shop=>{const o=document.createElement('option');o.value=item.id+'|'+shop.id;o.textContent=shop.name+'／'+item.name;select.append(o);}));const keyLabel=document.createElement('label');keyLabel.htmlFor='merchantKey';keyLabel.textContent='店家核銷密碼';const keyInput=document.createElement('input');keyInput.id='merchantKey';keyInput.type='password';keyInput.autocomplete='off';byId('merchant').prepend(label,select,keyLabel,keyInput);}
   async function checkinTemple(){try{const result=await requestApi('/api/checkin',{code:bookingCode});hide('templeCheckin');show('vow');byId('s4').classList.add('on');byId('remindDate').value=new Date(Date.now()+30*86400000).toISOString().slice(0,10);byId('headerSub').textContent=result.couponSent?'參拜完成，優惠已送到 LINE 聊天室':'參拜已完成；聊天室優惠發送狀態待確認';}catch(e){problem(e);}}
   async function saveVow(){try{const date=byId('remindDate').value;await requestApi('/api/vows',{code:bookingCode,date,temple:'台北市文昌宮'});hide('vow');show('done');byId('doneText').textContent='已儲存提醒日期：'+date;}catch(e){problem(e);}}
-  async function startLive(){const id=window.TempleHubConfig?.liffId;if(!id)return;try{await liff.init({liffId:id});if(!liff.isLoggedIn()){liff.login();return;}hide('chat');hide('askBox');show('prep');byId('headerSub').textContent='供品準備與參拜';bookingCode=sessionStorage.getItem('bookingCode')||'';const shop=new URLSearchParams(location.search).get('shop');if(shop)bookingMerchant=shop;}catch(e){problem(e);}}
+  async function startLive(){hide('chat');hide('askBox');const id=window.TempleHubConfig?.liffId;try{if(id){await liff.init({liffId:id});if(!liff.isLoggedIn()){liff.login();return;}}byId('headerSub').textContent='供品禮包';bookingCode=sessionStorage.getItem('bookingCode')||'';
+    if(bookingCode&&id){try{const status=await requestApi('/api/booking-status',{code:bookingCode});hide('prep');byId('merchantName').textContent='考試祈福禮包・逐項兌換';byId('codeText').textContent=bookingCode;byId('qr').replaceChildren();new QRCode(byId('qr'),{text:bookingCode,width:180,height:180});show('voucher');await refreshOrder();if(status.status==='redeemed')show('templeCheckin');}catch(e){sessionStorage.removeItem('bookingCode');bookingCode='';show('prep');}}
+    else show('prep');show('customer');
+  }catch(e){problem(e);}}
   renderOfferings();prepareMerchant().catch(problem);startLive();
 </script>
 </body>
