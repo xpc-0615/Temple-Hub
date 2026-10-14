@@ -4,7 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const {templeCards,shopCards,couponCards,shops,offerings,bundle,redeemItem} = require('./messages');
+const {templeCards,shopCards,couponCards,shops,offerings,bundle,redeemItem,stations,advanceStation} = require('./messages');
 const root = __dirname;
 const dbFile = path.join(root, 'data', 'demo-state.json');
 fs.mkdirSync(path.dirname(dbFile), { recursive: true });
@@ -46,7 +46,9 @@ async function verifiedUser(req){
 
 http.createServer(async (req, res) => {
   if(req.method==='GET' && req.url==='/api/offerings') return send(res,200,{items:offerings,bundle});
-  if(req.method==='POST' && req.url==='/api/booking-status') {const user=await verifiedUser(req);const {code}=await body(req);const b=readDb().bookings[code];if(!user||!b||b.lineUserId!==user)return send(res,403,{error:'無法查看此訂單'});return send(res,200,{items:b.items,status:b.status,total:b.total});}
+  if(req.method==='GET' && req.url==='/api/stations')return send(res,200,{stations});
+  if(req.method==='POST' && req.url==='/api/station-complete') {const user=await verifiedUser(req);const {code,stationCode}=await body(req);const db=readDb(),b=db.bookings[code];if(!user||!b||b.lineUserId!==user)return send(res,403,{error:'無法更新此訂單'});if(b.status!=='redeemed')return send(res,409,{error:'請先完成供品取貨'});try{const steps=advanceStation(b,stationCode);writeDb(db);return send(res,200,{ok:true,steps});}catch(e){return send(res,409,{error:e.message});}}
+  if(req.method==='POST' && req.url==='/api/booking-status') {const user=await verifiedUser(req);const {code}=await body(req);const b=readDb().bookings[code];if(!user||!b||b.lineUserId!==user)return send(res,403,{error:'無法查看此訂單'});return send(res,200,{items:b.items,status:b.status,total:b.total,steps:b.steps||[],checkedInAt:b.checkedInAt||null});}
   if(req.method==='GET' && req.url==='/health') return send(res,200,{ok:true,version:'chat-carousel-1'});
   if (req.method === 'GET' && req.url === '/config.js') return send(res, 200, `window.TempleHubConfig=${JSON.stringify({liffId:process.env.LIFF_ID || ''})};`, 'application/javascript; charset=utf-8');
   if (req.method === 'POST' && req.url === '/callback') {
@@ -95,6 +97,7 @@ http.createServer(async (req, res) => {
     const {code}=await body(req);const db=readDb();const booking=db.bookings[code];
     if(!booking||booking.lineUserId!==user||booking.status!=='redeemed') return send(res,409,{error:'請先完成本人預約的取貨核銷'});
     if(booking.checkedInAt) return send(res,200,{ok:true,alreadyCompleted:true});
+    if((booking.steps||[]).length!==stations.length)return send(res,409,{error:'請先依序完成所有參拜關卡'});
     booking.checkedInAt=new Date().toISOString();writeDb(db);
     const r=await fetch(`${lineApi}/push`,{method:'POST',headers:lineHeaders(),body:JSON.stringify({to:user,messages:[{type:'text',text:'參拜完成！以下為附近商家示範優惠。'},couponCards()]})});
     return send(res,200,{ok:true,couponSent:r.ok});

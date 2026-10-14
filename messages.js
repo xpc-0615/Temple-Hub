@@ -24,4 +24,15 @@ function redeemItem(booking,itemId,merchantId){
  booking.status=booking.items.every(i=>i.redeemedAt)?'redeemed':'partially_redeemed';
  return item;
 }
-module.exports={templeCards,shopCards,couponCards,temples,shops,offerings,bundle,redeemItem};
+const stations=[
+ {id:'arrival',title:'入廟・閱讀現場規範',action:'先閱讀公告，確認參拜動線、供品放置區及是否開放用香。',meaning:'尊重廟方管理與其他參拜者，先了解這座宮廟的做法。',attention:'不要擋住出入口；不確定時詢問服務人員。此流程為展示示意，並非台北市文昌宮認證流程。',location:'入口公告處'},
+ {id:'prayer',title:'敬拜・上香或合掌致意',action:'依現場人員指引敬拜；若允許用香，請先確認持香、插香與數量規定；不開放用香時可依指引合掌致意。',meaning:'以尊重的方式表達祈願，讓自己整理目標與心意。',attention:'避免香火接近衣物、頭髮與他人；不自行點火或增設香爐。沒有全台通用的用香規則，請以廟方公告為準。',location:'指定敬拜區旁（避免靠近火源）'},
+ {id:'finish',title:'禮成・整理與感謝',action:'確認供品如何處理，依指引整理物品與環境，再記下自己的還願計畫。',meaning:'讓參拜有完整收尾，也為下一位參拜者保留整潔空間。',attention:'不擅自拿取他人的供品；垃圾依現場分類，不在動線中停留。',location:'禮成出口／服務台'}
+];
+function advanceStation(booking,stationCode){
+ const completed=booking.steps||[];const next=stations[completed.length];
+ if(!next)throw Error('所有關卡已完成');
+ if(stationCode!=='TH-STATION:'+next.id)throw Error('這不是目前關卡的 QR，請依順序完成');
+ booking.steps=[...completed,{id:next.id,completedAt:new Date().toISOString()}];return booking.steps;
+}
+module.exports={templeCards,shopCards,couponCards,temples,shops,offerings,bundle,redeemItem,stations,advanceStation};
