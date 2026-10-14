@@ -69,7 +69,7 @@
       try { await liff.init({liffId}); if(liff.isLoggedIn()) { lineUserId=(await liff.getProfile()).userId; } }
       catch(e) { console.info('LIFF preview mode',e.message); }
     }
-    initLiff();
+    // startLive below initializes LIFF once before authenticated actions.
     const hide=id=>byId(id).classList.add('hidden'); const show=id=>byId(id).classList.remove('hidden');
     function askExam(){ byId('chat').innerHTML += '<div class="bubble me">下週要考試，想求心安</div><div class="bubble">我建議向文昌帝君祈求學業與考運。依台北市文昌宮公開資訊，我先為你整理了供品與參拜準備。</div>'; hide('askBox'); show('recommend'); }
     function showPrep(){ hide('recommend'); show('prep'); byId('s2').classList.add('on'); }
@@ -80,5 +80,20 @@
     async function checkinTemple(){ try { await fetch('/api/checkin',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:bookingCode,temple:'台北市文昌宮'})}); } catch(e) {} hide('templeCheckin'); show('vow'); byId('s4').classList.add('on'); const d=new Date();d.setDate(d.getDate()+30);byId('remindDate').value=d.toISOString().slice(0,10); }
     async function saveVow(){ const date=byId('remindDate').value; localStorage.setItem('templehub:vow',JSON.stringify({date,code:bookingCode,merchant:bookingMerchant})); try { await fetch('/api/vows',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:bookingCode,date,lineUserId,temple:'台北市文昌宮'})}); } catch(e) {} hide('vow'); show('done'); byId('doneText').textContent='提醒日：'+date+'。我們會提醒你回到台北市文昌宮還願。'; }
   </script>
+<script>
+  // Live LINE operations: every successful screen follows a confirmed server response.
+  async function requestApi(url,data,extra={}) {
+    const token=window.liff?.isLoggedIn()?liff.getAccessToken():'';
+    const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json',Authorization:'Bearer '+token,...extra},body:JSON.stringify(data)});
+    const result=await r.json();if(!r.ok) throw new Error(result.error||'操作失敗');return result;
+  }
+  function problem(error){byId('headerSub').textContent=error.message;}
+  async function book(name){try{const result=await requestApi('/api/bookings',{merchant:name,temple:'台北市文昌宮',items:['蔥','芹菜','粽子','包種茶']});bookingMerchant=name;bookingCode=result.code;sessionStorage.setItem('bookingCode',bookingCode);hide('prep');hide('merchantPick');byId('merchantName').textContent=name;byId('codeText').textContent=bookingCode;byId('qr').replaceChildren();new QRCode(byId('qr'),{text:bookingCode,width:180,height:180});show('voucher');}catch(e){problem(e);}}
+  async function redeem(){try{const key=prompt('請輸入店家核銷密碼');if(!key)return;const code=byId('redeemCode').value.trim();const result=await requestApi('/api/redeem',{code},{'x-merchant-key':key});byId('redeemResult').textContent='核銷成功：'+result.merchant;if(code===bookingCode){hide('voucher');show('templeCheckin');}}catch(e){problem(e);}}
+  async function checkinTemple(){try{const result=await requestApi('/api/checkin',{code:bookingCode});hide('templeCheckin');show('vow');byId('s4').classList.add('on');byId('remindDate').value=new Date(Date.now()+30*86400000).toISOString().slice(0,10);byId('headerSub').textContent=result.couponSent?'參拜完成，優惠已送到 LINE 聊天室':'參拜已完成；聊天室優惠發送狀態待確認';}catch(e){problem(e);}}
+  async function saveVow(){try{const date=byId('remindDate').value;await requestApi('/api/vows',{code:bookingCode,date,temple:'台北市文昌宮'});hide('vow');show('done');byId('doneText').textContent='已儲存提醒日期：'+date;}catch(e){problem(e);}}
+  async function startLive(){const id=window.TempleHubConfig?.liffId;if(!id)return;try{await liff.init({liffId:id});if(!liff.isLoggedIn()){liff.login();return;}hide('chat');hide('askBox');show('prep');byId('headerSub').textContent='供品準備與參拜';bookingCode=sessionStorage.getItem('bookingCode')||'';const shop=new URLSearchParams(location.search).get('shop');if(shop)bookingMerchant=shop;}catch(e){problem(e);}}
+  startLive();
+</script>
 </body>
 </html>

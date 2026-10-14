@@ -4,6 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const {templeCards,shopCards,couponCards,shops} = require('./messages');
 const root = __dirname;
 const dbFile = path.join(root, 'data', 'demo-state.json');
 fs.mkdirSync(path.dirname(dbFile), { recursive: true });
@@ -17,7 +18,8 @@ const lineHeaders = () => ({'Content-Type':'application/json', Authorization:`Be
 const lineReady = () => Boolean(process.env.LINE_CHANNEL_ACCESS_TOKEN && process.env.LINE_CHANNEL_SECRET);
 async function lineReply(replyToken, messages) {
   if (!lineReady()) return;
-  await fetch(`${lineApi}/reply`, {method:'POST', headers:lineHeaders(), body:JSON.stringify({replyToken, messages})});
+  const response=await fetch(`${lineApi}/reply`, {method:'POST', headers:lineHeaders(), body:JSON.stringify({replyToken, messages})});
+  if(!response.ok) console.error('LINE reply failed',response.status);
 }
 async function linePush(to, text) {
   if (!lineReady() || !to || to === 'demo-user') return false;
@@ -33,7 +35,17 @@ function examReply() {
   return {type:'flex', altText:'TempleHub 已為你準備考試祈福流程', contents:{type:'bubble', header:{type:'box',layout:'vertical',contents:[{type:'text',text:'TempleHub 考試祈福',weight:'bold',color:'#FFFFFF'}],backgroundColor:'#8B1A2B',paddingAll:'16px'},body:{type:'box',layout:'vertical',contents:[{type:'text',text:'建議向文昌帝君祈求學業與考運。',wrap:true},{type:'text',text:'已依台北市文昌宮公開資訊整理參拜與供品準備。',wrap:true,size:'sm',color:'#766D65',margin:'md'}]},footer:{type:'box',layout:'vertical',contents:[{type:'button',style:'primary',color:'#8B1A2B',action:{type:'uri',label:'開始準備與預約',uri:liffUrl}}]}}};
 }
 
+function liffLink(query='') { const base=process.env.LIFF_ID ? `https://liff.line.me/${process.env.LIFF_ID}` : process.env.APP_URL; return base ? base+'/?'+query : null; }
+async function verifiedUser(req){
+  const token=(req.headers.authorization||'').replace(/^Bearer /,'');
+  if(!token) return null;
+  const r=await fetch('https://api.line.me/v2/profile',{headers:{Authorization:'Bearer '+token}});
+  if(!r.ok) return null;
+  return (await r.json()).userId;
+}
+
 http.createServer(async (req, res) => {
+  if(req.method==='GET' && req.url==='/health') return send(res,200,{ok:true,version:'chat-carousel-1'});
   if (req.method === 'GET' && req.url === '/config.js') return send(res, 200, `window.TempleHubConfig=${JSON.stringify({liffId:process.env.LIFF_ID || ''})};`, 'application/javascript; charset=utf-8');
   if (req.method === 'POST' && req.url === '/callback') {
     const raw = await rawBody(req);
@@ -43,9 +55,16 @@ http.createServer(async (req, res) => {
       if (event.type === 'message' && event.message?.type === 'text') {
         const text = event.message.text;
         const match = /考試|文昌|學測|祈福/.test(text);
-        await lineReply(event.replyToken, match ? [examReply()] : [{type:'text',text:'請告訴我你想祈求的目標，例如：「下週考試，想求心安」。'}]);
+        await lineReply(event.replyToken, match ? [templeCards()] : [{type:'text',text:'歡迎來到 TempleHub！請告訴我你的祈福需求，例如「下週考試，想求心安」。目前開放考試祈福示範。'}]);
       }
-      if (event.type === 'postback' && event.postback?.data === 'action=exam') await lineReply(event.replyToken, [examReply()]);
+      if(event.type==='follow') await lineReply(event.replyToken,[{type:'text',text:'歡迎來到 TempleHub。輸入「考試祈福」開始選廟、準備供品與參拜旅程。'}]);
+      if(event.type==='postback') {
+        const data=new URLSearchParams(event.postback?.data||'');
+        if(data.get('action')==='exam') await lineReply(event.replyToken,[templeCards()]);
+        else if(data.has('temple')) await lineReply(event.replyToken,[{type:'text',text:'已選台北市文昌宮。可準備准考證影本與隨緣供品，以下為供品店家示範名單。'},shopCards()]);
+        else if(data.has('shop')) { const shop=shops.find(s=>s.id===data.get('shop')); const url=liffLink('shop='+encodeURIComponent(shop?.name||'')); await lineReply(event.replyToken,[url?{type:'template',altText:'開啟供品準備與參拜流程',template:{type:'buttons',text:'已選 '+(shop?.name||'示範店家')+'，前往準備清單與預約。',actions:[{type:'uri',label:'開啟供品與參拜流程',uri:url}]}}:{type:'text',text:'LIFF 尚未設定，請稍後再試。'}]); }
+        else if(data.has('coupon')) {const db=readDb(); const eligible=Object.values(db.bookings).some(b=>b.lineUserId===event.source?.userId&&b.checkedInAt); await lineReply(event.replyToken,[{type:'text',text:eligible?'已領取示範優惠：'+data.get('coupon')+'。此券僅供競賽展示，無真實折扣效力。':'請先完成參拜流程，再領取附近商家優惠。'}]);}
+      }
     }
     return send(res, 200, {});
   }
@@ -53,22 +72,32 @@ http.createServer(async (req, res) => {
     return send(res, 200, fs.readFileSync(path.join(root, 'TempleHub_完整流程Demo.html'), 'utf8'), 'text/html; charset=utf-8');
   }
   if (req.method === 'POST' && req.url === '/api/bookings') {
-    const item = await body(req); const db = readDb();
+    const user=await verifiedUser(req);if(!user) return send(res,401,{error:'請從 LINE 登入後預約'});
+    const item = await body(req); item.lineUserId=user; item.code='TH-'+crypto.randomBytes(12).toString('hex').toUpperCase(); const db = readDb();
     db.bookings[item.code] = { ...item, status:'reserved', createdAt:new Date().toISOString() }; writeDb(db); return send(res, 201, { code:item.code, status:'reserved' });
   }
   if (req.method === 'POST' && req.url === '/api/redeem') {
+    if(!process.env.MERCHANT_KEY || req.headers['x-merchant-key']!==process.env.MERCHANT_KEY) return send(res,403,{error:'需要店家核銷權限'});
     const {code} = await body(req); const db = readDb(); const booking = db.bookings[code];
     if (!booking || booking.status !== 'reserved') return send(res, 404, {ok:false});
     booking.status='redeemed'; booking.redeemedAt=new Date().toISOString(); writeDb(db); return send(res, 200, {ok:true, merchant:booking.merchant});
   }
   if (req.method === 'POST' && req.url === '/api/checkin') {
-    const {code, temple} = await body(req); const db = readDb(); if (db.bookings[code]) { db.bookings[code].checkedInAt=new Date().toISOString(); db.bookings[code].temple=temple; writeDb(db); } return send(res, 200, {ok:true});
+    const user=await verifiedUser(req); if(!user) return send(res,401,{error:'請先在 LINE 登入'});
+    const {code}=await body(req);const db=readDb();const booking=db.bookings[code];
+    if(!booking||booking.lineUserId!==user||booking.status!=='redeemed') return send(res,409,{error:'請先完成本人預約的取貨核銷'});
+    if(booking.checkedInAt) return send(res,200,{ok:true,alreadyCompleted:true});
+    booking.checkedInAt=new Date().toISOString();writeDb(db);
+    const r=await fetch(`${lineApi}/push`,{method:'POST',headers:lineHeaders(),body:JSON.stringify({to:user,messages:[{type:'text',text:'參拜完成！以下為附近商家示範優惠。'},couponCards()]})});
+    return send(res,200,{ok:true,couponSent:r.ok});
   }
   if (req.method === 'POST' && req.url === '/api/vows') {
-    const vow = await body(req); const db = readDb(); if (!db.vows) db.vows=[];
+    const user=await verifiedUser(req);if(!user) return send(res,401,{error:'請先登入 LINE'});
+    const vow = await body(req);vow.lineUserId=user; const db = readDb(); if(!db.bookings[vow.code]||db.bookings[vow.code].lineUserId!==user||!/^\d{4}-\d{2}-\d{2}$/.test(vow.date||'')) return send(res,400,{error:'無效的還願紀錄'}); if (!db.vows) db.vows=[];
     db.vows = db.vows.filter(item => item.code !== vow.code); db.vows.push({...vow, createdAt:new Date().toISOString(), remindedAt:null}); writeDb(db); return send(res, 201, {ok:true});
   }
   if (req.method === 'POST' && req.url === '/api/reminders/run') {
+    if(!process.env.CRON_SECRET || req.headers.authorization!=='Bearer '+process.env.CRON_SECRET) return send(res,403,{error:'Forbidden'});
     const db = readDb(); const today = new Date().toISOString().slice(0,10); let sent=0;
     for (const vow of db.vows || []) if (vow.date <= today && !vow.remindedAt && await linePush(vow.lineUserId, `TempleHub 提醒：今天是你預計回 ${vow.temple} 還願的日子。`)) { vow.remindedAt=new Date().toISOString(); sent++; }
     writeDb(db); return send(res, 200, {ok:true, sent});
