@@ -38,6 +38,9 @@ function examReply() {
 function liffLink(query='') { const base=process.env.LIFF_ID ? `https://liff.line.me/${process.env.LIFF_ID}` : process.env.APP_URL; return base ? base+'/?'+query : null; }
 function newJourney(db,user,temple='wenchang',eventId=null){db.journeys||={};if(eventId){const existing=Object.values(db.journeys).find(j=>j.eventId===eventId&&j.lineUserId===user);if(existing)return existing;}const id=crypto.randomUUID();const journey={id,lineUserId:user,temple,createdAt:new Date().toISOString(),eventId,code:null};db.journeys[id]=journey;return journey;}
 function journeyChoices(user){const db=readDb();const previous=Object.values(db.journeys||{}).some(j=>j.lineUserId===user)||Object.values(db.bookings).some(b=>b.lineUserId===user);return previous?{type:'template',altText:'開始新行程或繼續上次',template:{type:'buttons',text:'這次是新的祈福需求，還是繼續之前的行程？舊行程的核銷與參拜進度會保留。',actions:[{type:'postback',label:'開始新的考試祈福',data:'action=new-exam',displayText:'開始新的考試祈福'},{type:'uri',label:'查看我的行程',uri:liffLink('view=journeys')}]}}:templeCards();}
+const shoppingLinks=[{name:'全聯小時達',url:'https://shop.pxgo.com.tw/hourArrive'},{name:'Uber Eats',url:'https://www.ubereats.com/tw'},{name:'foodpanda',url:'https://www.foodpanda.com.tw/'}];
+function readyForWorship(b){return b?.status==='redeemed'||(b?.mode==='online'&&b?.status==='prepared');}
+function nextCode(db){const alphabet='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';let code;do{code=Array.from({length:8},()=>alphabet[crypto.randomInt(alphabet.length)]).join('');}while(db.bookings[code]);return code;}
 async function verifiedUser(req){
   const token=(req.headers.authorization||'').replace(/^Bearer /,'');
   if(!token) return null;
@@ -47,14 +50,24 @@ async function verifiedUser(req){
 }
 
 http.createServer(async (req, res) => {
+  if(req.method==='POST' && req.url==='/api/online-checklist'){
+    const user=await verifiedUser(req),input=await body(req),db=readDb(),j=db.journeys?.[input.journeyId];
+    if(!user||!j||j.lineUserId!==user)return send(res,403,{error:'無法修改此行程的清單'});
+    if(input.itemId!==undefined&&(!offerings.some(i=>i.id===input.itemId)||typeof input.checked!=='boolean'))return send(res,400,{error:'清單項目或勾選狀態不正確'});
+    let b=j.code?db.bookings[j.code]:null;
+    if(b&&b.mode!=='online')return send(res,409,{error:'本行程已使用在地商家體驗；請開始新行程選擇另一種準備方式'});
+    if(!b){const code=nextCode(db);j.code=code;b={code,journeyId:j.id,lineUserId:user,temple:'台北市文昌宮',mode:'online',status:'preparing',paymentStatus:'self_purchase_external',total:null,createdAt:new Date().toISOString(),items:offerings.map(i=>({itemId:i.id,item:i.name,note:i.note,prepared:false}))};db.bookings[code]=b;}
+    if(input.itemId!==undefined){if((b.steps||[]).length||b.checkedInAt)return send(res,409,{error:'已開始參拜，備料清單已鎖定'});b.items.find(i=>i.itemId===input.itemId).prepared=input.checked;b.status=b.items.every(i=>i.prepared)?'prepared':'preparing';}
+    writeDb(db);return send(res,200,{code:b.code,status:b.status});
+  }
   if(req.method==='POST' && req.url==='/api/journeys'){const user=await verifiedUser(req);if(!user)return send(res,401,{error:'請先登入 LINE'});const db=readDb(),journey=newJourney(db,user);writeDb(db);return send(res,201,{journeyId:journey.id});}
-  if(req.method==='POST' && req.url==='/api/journey'){const user=await verifiedUser(req),{journeyId}=await body(req);const j=readDb().journeys?.[journeyId];if(!user||!j||j.lineUserId!==user)return send(res,403,{error:'此行程不存在或不屬於你；請回到我的行程，不會自動建立新訂單'});return send(res,200,{journeyId:j.id,code:j.code});}
+  if(req.method==='POST' && req.url==='/api/journey'){const user=await verifiedUser(req),{journeyId}=await body(req);const db=readDb(),j=db.journeys?.[journeyId];if(!user||!j||j.lineUserId!==user)return send(res,403,{error:'此行程不存在或不屬於你；請回到我的行程，不會自動建立新訂單'});return send(res,200,{journeyId:j.id,code:j.code,mode:j.code?(db.bookings[j.code]?.mode||'local'):null});}
   if(req.method==='POST' && req.url==='/api/journeys/list'){const user=await verifiedUser(req);if(!user)return send(res,401,{error:'請先登入 LINE'});const db=readDb();const journeys=Object.values(db.journeys||{}).filter(j=>j.lineUserId===user).map(j=>({journeyId:j.id,code:j.code,createdAt:j.createdAt,status:j.code?db.bookings[j.code]?.status:'planning'}));const legacy=Object.values(db.bookings).filter(b=>b.lineUserId===user&&!b.journeyId).map(b=>({code:b.code,createdAt:b.createdAt,status:b.status}));return send(res,200,{journeys:[...journeys,...legacy].sort((a,b)=>b.createdAt.localeCompare(a.createdAt))});}
   if(req.method==='POST' && req.url==='/api/current-booking'){const user=await verifiedUser(req);if(!user)return send(res,401,{error:'請先登入 LINE'});const bookings=Object.values(readDb().bookings).filter(b=>b.lineUserId===user).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));return send(res,200,{code:bookings[0]?.code||null});}
-  if(req.method==='GET' && req.url==='/api/offerings') return send(res,200,{items:offerings,bundle});
+  if(req.method==='GET' && req.url==='/api/offerings') return send(res,200,{items:offerings,bundle,shoppingLinks});
   if(req.method==='GET' && req.url==='/api/stations')return send(res,200,{stations});
-  if(req.method==='POST' && req.url==='/api/station-complete') {const user=await verifiedUser(req);const {code,stationCode}=await body(req);const db=readDb(),b=db.bookings[code];if(!user||!b||b.lineUserId!==user)return send(res,403,{error:'無法更新此訂單'});if(b.status!=='redeemed')return send(res,409,{error:'請先完成供品取貨'});try{const steps=advanceStation(b,stationCode);writeDb(db);return send(res,200,{ok:true,steps});}catch(e){return send(res,409,{error:e.message});}}
-  if(req.method==='POST' && req.url==='/api/booking-status') {const user=await verifiedUser(req);const {code}=await body(req);const db=readDb(),b=db.bookings[code];if(!user||!b||b.lineUserId!==user)return send(res,403,{error:'無法查看此訂單'});return send(res,200,{items:b.items,status:b.status,total:b.total,paymentStatus:b.paymentStatus,vowDate:(db.vows||[]).find(v=>v.code===code)?.date||null,steps:b.steps||[],checkedInAt:b.checkedInAt||null});}
+  if(req.method==='POST' && req.url==='/api/station-complete') {const user=await verifiedUser(req);const {code,stationCode}=await body(req);const db=readDb(),b=db.bookings[code];if(!user||!b||b.lineUserId!==user)return send(res,403,{error:'無法更新此訂單'});if(!readyForWorship(b))return send(res,409,{error:'請先完成供品準備'});try{const steps=advanceStation(b,stationCode);writeDb(db);return send(res,200,{ok:true,steps});}catch(e){return send(res,409,{error:e.message});}}
+  if(req.method==='POST' && req.url==='/api/booking-status') {const user=await verifiedUser(req);const {code}=await body(req);const db=readDb(),b=db.bookings[code];if(!user||!b||b.lineUserId!==user)return send(res,403,{error:'無法查看此訂單'});return send(res,200,{journeyId:b.journeyId,mode:b.mode||'local',items:b.items,status:b.status,total:b.total,paymentStatus:b.paymentStatus,vowDate:(db.vows||[]).find(v=>v.code===code)?.date||null,steps:b.steps||[],checkedInAt:b.checkedInAt||null});}
   if(req.method==='GET' && req.url==='/health') return send(res,200,{ok:true,version:'chat-carousel-1'});
   if (req.method === 'GET' && req.url === '/config.js') return send(res, 200, `window.TempleHubConfig=${JSON.stringify({liffId:process.env.LIFF_ID || ''})};`, 'application/javascript; charset=utf-8');
   if (req.method === 'POST' && req.url === '/callback') {
@@ -72,7 +85,7 @@ http.createServer(async (req, res) => {
         const data=new URLSearchParams(event.postback?.data||'');
         if(data.get('action')==='exam') await lineReply(event.replyToken,[journeyChoices(event.source?.userId)]);
         else if(data.get('action')==='new-exam')await lineReply(event.replyToken,[templeCards()]);
-        else if(data.has('temple')) {const user=event.source?.userId;if(!user)continue;const db=readDb(),journey=newJourney(db,user,'wenchang',event.webhookEventId);writeDb(db);const url=liffLink('journey='+encodeURIComponent(journey.id));await lineReply(event.replyToken,[url?{type:'template',altText:'本次祈福專屬供品清單',template:{type:'buttons',text:'已選台北市文昌宮。這是本次行程的專屬清單，重新開啟會保留本次進度。',actions:[{type:'uri',label:'查看本次供品清單',uri:url}]}}:{type:'text',text:'供品清單設定中，請稍後再試。'}]);}
+        else if(data.has('temple')) {const user=event.source?.userId;if(!user)continue;const db=readDb(),journey=newJourney(db,user,'wenchang',event.webhookEventId);writeDb(db);const query='journey='+encodeURIComponent(journey.id),url=liffLink(query);await lineReply(event.replyToken,[url?{type:'template',altText:'選擇供品準備方式：線上自行準備／在地商家體驗',template:{type:'buttons',text:'已選台北市文昌宮。請選擇本次供品準備方式：自行購買勾選清單，或到在地示範店家體驗核銷。',actions:[{type:'uri',label:'線上購物・自行準備',uri:liffLink(query+'&mode=online')},{type:'uri',label:'在地商家購物體驗',uri:liffLink(query+'&mode=local')}]}}:{type:'text',text:'供品清單設定中，請稍後再試。'}]);}
         else if(data.has('shop')) { const shop=shops.find(s=>s.id===data.get('shop')); const url=liffLink('shop='+encodeURIComponent(shop?.name||'')); await lineReply(event.replyToken,[url?{type:'template',altText:'開啟供品準備與參拜流程',template:{type:'buttons',text:'已選 '+(shop?.name||'示範店家')+'，前往準備清單與預約。',actions:[{type:'uri',label:'開啟供品與參拜流程',uri:url}]}}:{type:'text',text:'LIFF 尚未設定，請稍後再試。'}]); }
         else if(data.has('coupon')) {const db=readDb(); const eligible=Object.values(db.bookings).some(b=>b.lineUserId===event.source?.userId&&b.checkedInAt); await lineReply(event.replyToken,[{type:'text',text:eligible?'已領取示範優惠：'+data.get('coupon')+'。此券僅供競賽展示，無真實折扣效力。':'請先完成參拜流程，再領取附近商家優惠。'}]);}
       }
@@ -86,12 +99,12 @@ http.createServer(async (req, res) => {
     const user=await verifiedUser(req);if(!user) return send(res,401,{error:'請從 LINE 登入後預約'});
     const input=await body(req);const item={bundleId:input.bundleId,journeyId:input.journeyId,temple:'台北市文昌宮',lineUserId:user};const db=readDb();
     const journey=db.journeys?.[item.journeyId];if(!journey||journey.lineUserId!==user)return send(res,403,{error:'請先建立自己的祈福行程'});
-    if(journey.code)return send(res,200,{code:journey.code,status:db.bookings[journey.code]?.status});
+    if(journey.code){if(db.bookings[journey.code]?.mode==='online')return send(res,409,{error:'本行程為線上自行準備，不需購買在地禮包'});return send(res,200,{code:journey.code,status:db.bookings[journey.code]?.status});}
     const alphabet='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     do{item.code=Array.from({length:8},()=>alphabet[crypto.randomInt(alphabet.length)]).join('');}while(db.bookings[item.code]);
     if(item.bundleId!==bundle.id)return send(res,400,{error:'請選擇有效的禮包'});
     item.items=offerings.map(p=>({itemId:p.id,item:p.name,price:p.price,eligibleMerchantIds:p.options.map(o=>o.id),redeemedAt:null,redeemedBy:null}));
-    item.total=bundle.price;item.regularPrice=bundle.regularPrice;item.merchant='任一符合資格的合作示範店';item.paymentStatus='demo_no_charge';journey.code=item.code;
+    item.mode='local';item.total=bundle.price;item.regularPrice=bundle.regularPrice;item.merchant='任一符合資格的合作示範店';item.paymentStatus='demo_no_charge';journey.code=item.code;
     db.bookings[item.code] = { ...item, status:'reserved', createdAt:new Date().toISOString() }; writeDb(db); return send(res, 201, { code:item.code, status:'reserved' });
   }
   if (req.method === 'POST' && req.url === '/api/redeem') {
@@ -103,6 +116,7 @@ http.createServer(async (req, res) => {
     if(!expected||!provided||Buffer.byteLength(expected)!==Buffer.byteLength(provided)||!crypto.timingSafeEqual(Buffer.from(expected),Buffer.from(provided)))return send(res,403,{error:'店家身分或核銷密碼不正確'});
     // No await between read, check and write: atomic within this single server process.
     const db=readDb();const booking=db.bookings[code]||db.bookings[String(input.code||'').trim().toUpperCase()];
+    if(booking?.mode==='online')return send(res,409,{error:'自行購買清單不使用店家核銷'});
     let item;try{item=redeemItem(booking,itemId,merchantId);writeDb(db);}catch(e){return send(res,409,{error:e.message});}
     let prayerLinkSent=false;
     if(booking.status==='redeemed' && !booking.prayerLinkSentAt){const uri=liffLink('view=prayer&order='+encodeURIComponent(booking.code));if(uri&&lineReady()){try{const pushed=await fetch(`${lineApi}/push`,{method:'POST',headers:lineHeaders(),body:JSON.stringify({to:booking.lineUserId,messages:[{type:'template',altText:'供品已備齊，進入參拜流程',template:{type:'buttons',text:'供品已全部取貨完成！點下方按鈕接續參拜闖關，進度會自動保留。',actions:[{type:'uri',label:'進入參拜流程',uri}]}}]})});prayerLinkSent=pushed.ok;if(prayerLinkSent){const latest=readDb();if(latest.bookings[booking.code]){latest.bookings[booking.code].prayerLinkSentAt=new Date().toISOString();writeDb(latest);}}}catch(e){console.error('Prayer link delivery failed');}}}
@@ -111,7 +125,7 @@ http.createServer(async (req, res) => {
   if (req.method === 'POST' && req.url === '/api/checkin') {
     const user=await verifiedUser(req); if(!user) return send(res,401,{error:'請先在 LINE 登入'});
     const {code}=await body(req);const db=readDb();const booking=db.bookings[code];
-    if(!booking||booking.lineUserId!==user||booking.status!=='redeemed') return send(res,409,{error:'請先完成本人預約的取貨核銷'});
+    if(!booking||booking.lineUserId!==user||!readyForWorship(booking)) return send(res,409,{error:'請先完成本人行程的供品準備'});
     if(booking.checkedInAt) return send(res,200,{ok:true,alreadyCompleted:true});
     if((booking.steps||[]).length!==stations.length)return send(res,409,{error:'請先依序完成所有參拜關卡'});
     booking.checkedInAt=new Date().toISOString();writeDb(db);
