@@ -128,9 +128,9 @@
   async function startLive(){hide('chat');hide('askBox');const id=window.TempleHubConfig?.liffId;try{
     if(id){await liff.init({liffId:id});if(!liff.isLoggedIn()){liff.login();return;}}
     await prepareMerchant();show('customer');const params=new URLSearchParams(location.search);bookingCode=params.get('order')||'';journeyId=params.get('journey')||'';
-    if(journeyId){const current=await requestApi('/api/journey',{journeyId});bookingCode=current.code||'';}
+    let requestedMode=params.get('mode');if(journeyId){const current=await requestApi('/api/journey',{journeyId,...(requestedMode?{mode:requestedMode}:{})});journeyId=current.journeyId;bookingCode=current.code||'';requestedMode=current.mode||requestedMode||'local';const url=new URL(location.href);url.searchParams.set('journey',journeyId);url.searchParams.set('mode',requestedMode);history.replaceState(null,'',url.href);}
     if(bookingCode){sessionStorage.setItem('bookingCode',bookingCode);await refreshOrder();}
-    else if(journeyId){const mode=params.get('mode');if(mode==='online'||mode==='local')await choosePreparation(mode);else renderModeChoice();}
+    else if(journeyId){await choosePreparation(requestedMode||'local');}
     else await renderJourneys();
   }catch(e){hide('prep');hide('voucher');problem(e);show('customer');const p=document.createElement('p');p.textContent=e.message;const b=document.createElement('button');b.className='secondary';b.textContent='回到我的行程';b.onclick=()=>renderJourneys().catch(problem);byId('customer').append(p,b);}}
   if(new URLSearchParams(location.search).has('stations'))stationSigns().catch(problem);else if(new URLSearchParams(location.search).has('redeemOrder')){prepareMerchant().catch(problem);}else startLive();
