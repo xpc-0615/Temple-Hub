@@ -86,9 +86,11 @@ http.createServer(async (req, res) => {
     db.bookings[item.code] = { ...item, status:'reserved', createdAt:new Date().toISOString() }; writeDb(db); return send(res, 201, { code:item.code, status:'reserved' });
   }
   if (req.method === 'POST' && req.url === '/api/redeem') {
-    const input=await body(req);const code=String(input.code||'').replace(/\s|-/g,'').toUpperCase();const {itemId,merchantId}=input;
+    const input=await body(req);const code=String(input.code||'').replace(/\s|-/g,'').toUpperCase();const {itemId}=input;let merchantId=input.merchantId;
     let keys={};try{keys=JSON.parse(process.env.MERCHANT_KEYS||'{}');}catch{}
-    const expected=keys[merchantId],provided=req.headers['x-merchant-key'];
+    const provided=req.headers['x-merchant-key'];
+    if(!merchantId&&provided){const matches=Object.keys(keys).filter(id=>typeof keys[id]==='string'&&Buffer.byteLength(keys[id])===Buffer.byteLength(provided)&&crypto.timingSafeEqual(Buffer.from(keys[id]),Buffer.from(provided)));if(matches.length===1)merchantId=matches[0];}
+    const expected=keys[merchantId];
     if(!expected||!provided||Buffer.byteLength(expected)!==Buffer.byteLength(provided)||!crypto.timingSafeEqual(Buffer.from(expected),Buffer.from(provided)))return send(res,403,{error:'店家身分或核銷密碼不正確'});
     // No await between read, check and write: atomic within this single server process.
     const db=readDb();const booking=db.bookings[code]||db.bookings[String(input.code||'').trim().toUpperCase()];
