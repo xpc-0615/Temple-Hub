@@ -45,6 +45,7 @@ async function verifiedUser(req){
 }
 
 http.createServer(async (req, res) => {
+  if(req.method==='POST' && req.url==='/api/current-booking'){const user=await verifiedUser(req);if(!user)return send(res,401,{error:'請先登入 LINE'});const bookings=Object.values(readDb().bookings).filter(b=>b.lineUserId===user).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));return send(res,200,{code:bookings[0]?.code||null});}
   if(req.method==='GET' && req.url==='/api/offerings') return send(res,200,{items:offerings,bundle});
   if(req.method==='GET' && req.url==='/api/stations')return send(res,200,{stations});
   if(req.method==='POST' && req.url==='/api/station-complete') {const user=await verifiedUser(req);const {code,stationCode}=await body(req);const db=readDb(),b=db.bookings[code];if(!user||!b||b.lineUserId!==user)return send(res,403,{error:'無法更新此訂單'});if(b.status!=='redeemed')return send(res,409,{error:'請先完成供品取貨'});try{const steps=advanceStation(b,stationCode);writeDb(db);return send(res,200,{ok:true,steps});}catch(e){return send(res,409,{error:e.message});}}
@@ -94,7 +95,10 @@ http.createServer(async (req, res) => {
     if(!expected||!provided||Buffer.byteLength(expected)!==Buffer.byteLength(provided)||!crypto.timingSafeEqual(Buffer.from(expected),Buffer.from(provided)))return send(res,403,{error:'店家身分或核銷密碼不正確'});
     // No await between read, check and write: atomic within this single server process.
     const db=readDb();const booking=db.bookings[code]||db.bookings[String(input.code||'').trim().toUpperCase()];
-    try{const item=redeemItem(booking,itemId,merchantId);writeDb(db);return send(res,200,{ok:true,item:item.item,status:booking.status});}catch(e){return send(res,409,{error:e.message});}
+    let item;try{item=redeemItem(booking,itemId,merchantId);writeDb(db);}catch(e){return send(res,409,{error:e.message});}
+    let prayerLinkSent=false;
+    if(booking.status==='redeemed' && !booking.prayerLinkSentAt){const uri=liffLink('view=prayer&order='+encodeURIComponent(booking.code));if(uri&&lineReady()){try{const pushed=await fetch(`${lineApi}/push`,{method:'POST',headers:lineHeaders(),body:JSON.stringify({to:booking.lineUserId,messages:[{type:'template',altText:'供品已備齊，進入參拜流程',template:{type:'buttons',text:'供品已全部取貨完成！點下方按鈕接續參拜闖關，進度會自動保留。',actions:[{type:'uri',label:'進入參拜流程',uri}]}}]})});prayerLinkSent=pushed.ok;if(prayerLinkSent){const latest=readDb();if(latest.bookings[booking.code]){latest.bookings[booking.code].prayerLinkSentAt=new Date().toISOString();writeDb(latest);}}}catch(e){console.error('Prayer link delivery failed');}}}
+    return send(res,200,{ok:true,item:item.item,status:booking.status,prayerLinkSent});
   }
   if (req.method === 'POST' && req.url === '/api/checkin') {
     const user=await verifiedUser(req); if(!user) return send(res,401,{error:'請先在 LINE 登入'});
