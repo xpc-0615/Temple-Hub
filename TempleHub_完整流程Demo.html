@@ -57,7 +57,7 @@
         <div id="vow" class="hidden"><div class="card success"><div class="status">✓</div><h2>參拜旅程已完成</h2><p>是否要把「考試順利後回來還願」記下來？</p><label>提醒日期</label><input id="remindDate" type="date"><button class="primary" onclick="saveVow()">設定 LINE 還願提醒</button></div></div>
         <div id="done" class="hidden"><div class="card success"><div class="status">✓</div><h2>已記下你的還願心願</h2><p id="doneText"></p><p class="muted">正式版會由 Messaging API 在提醒日對已加入 OA 且同意提醒的使用者發送推播。</p></div><button class="secondary" onclick="location.reload()">重新跑一次 Demo</button></div>
       </section>
-      <section id="merchant" class="hidden"><h2>店家核銷端</h2><p class="muted">Demo：可由店員輸入信徒 QR 下方的代碼。</p><label>核銷碼</label><input id="redeemCode" placeholder="例如 TH-ABC123"><button class="green" onclick="redeem()">核銷預約</button><div id="redeemResult"></div><hr><button class="secondary" onclick="openRole('customer')">回到信徒端</button></section>
+      <section id="merchant" class="hidden"><h2>店家核銷端</h2><p class="muted">輸入顧客 QR 下方的 8 碼訂單碼即可，大小寫皆可。</p><label for="redeemCode">訂單核銷碼</label><input id="redeemCode" placeholder="例如 7K3M9AX2" autocapitalize="characters" autocomplete="off" spellcheck="false"><button class="green" onclick="redeem()">核銷預約</button><div id="redeemResult"></div><hr><button class="secondary" onclick="openRole('customer')">回到信徒端</button></section>
     </main>
     <footer>TempleHub 競賽技術 Demo｜店家與宮廟名稱為公開資訊的示範資料，並不代表合作關係。</footer>
   </div>

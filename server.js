@@ -77,19 +77,21 @@ http.createServer(async (req, res) => {
   }
   if (req.method === 'POST' && req.url === '/api/bookings') {
     const user=await verifiedUser(req);if(!user) return send(res,401,{error:'請從 LINE 登入後預約'});
-    const item = await body(req); item.lineUserId=user; item.code='TH-'+crypto.randomBytes(12).toString('hex').toUpperCase(); const db = readDb();
+    const item = await body(req); item.lineUserId=user; const db = readDb();
+    const alphabet='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    do{item.code=Array.from({length:8},()=>alphabet[crypto.randomInt(alphabet.length)]).join('');}while(db.bookings[item.code]);
     if(item.bundleId!==bundle.id)return send(res,400,{error:'請選擇有效的禮包'});
     item.items=offerings.map(p=>({itemId:p.id,item:p.name,price:p.price,eligibleMerchantIds:p.options.map(o=>o.id),redeemedAt:null,redeemedBy:null}));
     item.total=bundle.price;item.regularPrice=bundle.regularPrice;item.merchant='任一符合資格的合作示範店';item.paymentStatus='demo_no_charge';delete item.selections;
     db.bookings[item.code] = { ...item, status:'reserved', createdAt:new Date().toISOString() }; writeDb(db); return send(res, 201, { code:item.code, status:'reserved' });
   }
   if (req.method === 'POST' && req.url === '/api/redeem') {
-    const {code,itemId,merchantId}=await body(req);
+    const input=await body(req);const code=String(input.code||'').replace(/\s|-/g,'').toUpperCase();const {itemId,merchantId}=input;
     let keys={};try{keys=JSON.parse(process.env.MERCHANT_KEYS||'{}');}catch{}
     const expected=keys[merchantId],provided=req.headers['x-merchant-key'];
     if(!expected||!provided||Buffer.byteLength(expected)!==Buffer.byteLength(provided)||!crypto.timingSafeEqual(Buffer.from(expected),Buffer.from(provided)))return send(res,403,{error:'店家身分或核銷密碼不正確'});
     // No await between read, check and write: atomic within this single server process.
-    const db=readDb();const booking=db.bookings[code];
+    const db=readDb();const booking=db.bookings[code]||db.bookings[String(input.code||'').trim().toUpperCase()];
     try{const item=redeemItem(booking,itemId,merchantId);writeDb(db);return send(res,200,{ok:true,item:item.item,status:booking.status});}catch(e){return send(res,409,{error:e.message});}
   }
   if (req.method === 'POST' && req.url === '/api/checkin') {
