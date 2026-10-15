@@ -36,6 +36,8 @@ function examReply() {
 }
 
 function liffLink(query='') { const base=process.env.LIFF_ID ? `https://liff.line.me/${process.env.LIFF_ID}` : process.env.APP_URL; return base ? base+'/?'+query : null; }
+function newJourney(db,user,temple='wenchang',eventId=null){db.journeys||={};if(eventId){const existing=Object.values(db.journeys).find(j=>j.eventId===eventId&&j.lineUserId===user);if(existing)return existing;}const id=crypto.randomUUID();const journey={id,lineUserId:user,temple,createdAt:new Date().toISOString(),eventId,code:null};db.journeys[id]=journey;return journey;}
+function journeyChoices(user){const db=readDb();const previous=Object.values(db.journeys||{}).some(j=>j.lineUserId===user)||Object.values(db.bookings).some(b=>b.lineUserId===user);return previous?{type:'template',altText:'開始新行程或繼續上次',template:{type:'buttons',text:'這次是新的祈福需求，還是繼續之前的行程？舊行程的核銷與參拜進度會保留。',actions:[{type:'postback',label:'開始新的考試祈福',data:'action=new-exam',displayText:'開始新的考試祈福'},{type:'uri',label:'查看我的行程',uri:liffLink('view=journeys')}]}}:templeCards();}
 async function verifiedUser(req){
   const token=(req.headers.authorization||'').replace(/^Bearer /,'');
   if(!token) return null;
@@ -45,11 +47,14 @@ async function verifiedUser(req){
 }
 
 http.createServer(async (req, res) => {
+  if(req.method==='POST' && req.url==='/api/journeys'){const user=await verifiedUser(req);if(!user)return send(res,401,{error:'請先登入 LINE'});const db=readDb(),journey=newJourney(db,user);writeDb(db);return send(res,201,{journeyId:journey.id});}
+  if(req.method==='POST' && req.url==='/api/journey'){const user=await verifiedUser(req),{journeyId}=await body(req);const j=readDb().journeys?.[journeyId];if(!user||!j||j.lineUserId!==user)return send(res,403,{error:'此行程不存在或不屬於你；請回到我的行程，不會自動建立新訂單'});return send(res,200,{journeyId:j.id,code:j.code});}
+  if(req.method==='POST' && req.url==='/api/journeys/list'){const user=await verifiedUser(req);if(!user)return send(res,401,{error:'請先登入 LINE'});const db=readDb();const journeys=Object.values(db.journeys||{}).filter(j=>j.lineUserId===user).map(j=>({journeyId:j.id,code:j.code,createdAt:j.createdAt,status:j.code?db.bookings[j.code]?.status:'planning'}));const legacy=Object.values(db.bookings).filter(b=>b.lineUserId===user&&!b.journeyId).map(b=>({code:b.code,createdAt:b.createdAt,status:b.status}));return send(res,200,{journeys:[...journeys,...legacy].sort((a,b)=>b.createdAt.localeCompare(a.createdAt))});}
   if(req.method==='POST' && req.url==='/api/current-booking'){const user=await verifiedUser(req);if(!user)return send(res,401,{error:'請先登入 LINE'});const bookings=Object.values(readDb().bookings).filter(b=>b.lineUserId===user).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));return send(res,200,{code:bookings[0]?.code||null});}
   if(req.method==='GET' && req.url==='/api/offerings') return send(res,200,{items:offerings,bundle});
   if(req.method==='GET' && req.url==='/api/stations')return send(res,200,{stations});
   if(req.method==='POST' && req.url==='/api/station-complete') {const user=await verifiedUser(req);const {code,stationCode}=await body(req);const db=readDb(),b=db.bookings[code];if(!user||!b||b.lineUserId!==user)return send(res,403,{error:'無法更新此訂單'});if(b.status!=='redeemed')return send(res,409,{error:'請先完成供品取貨'});try{const steps=advanceStation(b,stationCode);writeDb(db);return send(res,200,{ok:true,steps});}catch(e){return send(res,409,{error:e.message});}}
-  if(req.method==='POST' && req.url==='/api/booking-status') {const user=await verifiedUser(req);const {code}=await body(req);const b=readDb().bookings[code];if(!user||!b||b.lineUserId!==user)return send(res,403,{error:'無法查看此訂單'});return send(res,200,{items:b.items,status:b.status,total:b.total,steps:b.steps||[],checkedInAt:b.checkedInAt||null});}
+  if(req.method==='POST' && req.url==='/api/booking-status') {const user=await verifiedUser(req);const {code}=await body(req);const db=readDb(),b=db.bookings[code];if(!user||!b||b.lineUserId!==user)return send(res,403,{error:'無法查看此訂單'});return send(res,200,{items:b.items,status:b.status,total:b.total,paymentStatus:b.paymentStatus,vowDate:(db.vows||[]).find(v=>v.code===code)?.date||null,steps:b.steps||[],checkedInAt:b.checkedInAt||null});}
   if(req.method==='GET' && req.url==='/health') return send(res,200,{ok:true,version:'chat-carousel-1'});
   if (req.method === 'GET' && req.url === '/config.js') return send(res, 200, `window.TempleHubConfig=${JSON.stringify({liffId:process.env.LIFF_ID || ''})};`, 'application/javascript; charset=utf-8');
   if (req.method === 'POST' && req.url === '/callback') {
@@ -60,13 +65,14 @@ http.createServer(async (req, res) => {
       if (event.type === 'message' && event.message?.type === 'text') {
         const text = event.message.text;
         const match = /考試|文昌|學測|祈福/.test(text);
-        await lineReply(event.replyToken, match ? [templeCards()] : [{type:'text',text:'歡迎來到 TempleHub！請告訴我你的祈福需求，例如「下週考試，想求心安」。目前開放考試祈福示範。'}]);
+        await lineReply(event.replyToken, match ? [journeyChoices(event.source?.userId)] : [{type:'text',text:'歡迎來到 TempleHub！請告訴我你的祈福需求，例如「下週考試，想求心安」。目前開放考試祈福示範。'}]);
       }
       if(event.type==='follow') await lineReply(event.replyToken,[{type:'text',text:'歡迎來到 TempleHub。輸入「考試祈福」開始選廟、準備供品與參拜旅程。'}]);
       if(event.type==='postback') {
         const data=new URLSearchParams(event.postback?.data||'');
-        if(data.get('action')==='exam') await lineReply(event.replyToken,[templeCards()]);
-        else if(data.has('temple')) {const url=liffLink('temple=wenchang');await lineReply(event.replyToken,[url?{type:'template',altText:'台北市文昌宮・開啟供品清單',template:{type:'buttons',text:'已選台北市文昌宮。在供品清單內比較每項供品的店家，確認後建立預約。',actions:[{type:'uri',label:'查看供品清單',uri:url}]}}:{type:'text',text:'供品清單設定中，請稍後再試。'}]);}
+        if(data.get('action')==='exam') await lineReply(event.replyToken,[journeyChoices(event.source?.userId)]);
+        else if(data.get('action')==='new-exam')await lineReply(event.replyToken,[templeCards()]);
+        else if(data.has('temple')) {const user=event.source?.userId;if(!user)continue;const db=readDb(),journey=newJourney(db,user,'wenchang',event.webhookEventId);writeDb(db);const url=liffLink('journey='+encodeURIComponent(journey.id));await lineReply(event.replyToken,[url?{type:'template',altText:'本次祈福專屬供品清單',template:{type:'buttons',text:'已選台北市文昌宮。這是本次行程的專屬清單，重新開啟會保留本次進度。',actions:[{type:'uri',label:'查看本次供品清單',uri:url}]}}:{type:'text',text:'供品清單設定中，請稍後再試。'}]);}
         else if(data.has('shop')) { const shop=shops.find(s=>s.id===data.get('shop')); const url=liffLink('shop='+encodeURIComponent(shop?.name||'')); await lineReply(event.replyToken,[url?{type:'template',altText:'開啟供品準備與參拜流程',template:{type:'buttons',text:'已選 '+(shop?.name||'示範店家')+'，前往準備清單與預約。',actions:[{type:'uri',label:'開啟供品與參拜流程',uri:url}]}}:{type:'text',text:'LIFF 尚未設定，請稍後再試。'}]); }
         else if(data.has('coupon')) {const db=readDb(); const eligible=Object.values(db.bookings).some(b=>b.lineUserId===event.source?.userId&&b.checkedInAt); await lineReply(event.replyToken,[{type:'text',text:eligible?'已領取示範優惠：'+data.get('coupon')+'。此券僅供競賽展示，無真實折扣效力。':'請先完成參拜流程，再領取附近商家優惠。'}]);}
       }
@@ -78,12 +84,14 @@ http.createServer(async (req, res) => {
   }
   if (req.method === 'POST' && req.url === '/api/bookings') {
     const user=await verifiedUser(req);if(!user) return send(res,401,{error:'請從 LINE 登入後預約'});
-    const item = await body(req); item.lineUserId=user; const db = readDb();
+    const input=await body(req);const item={bundleId:input.bundleId,journeyId:input.journeyId,temple:'台北市文昌宮',lineUserId:user};const db=readDb();
+    const journey=db.journeys?.[item.journeyId];if(!journey||journey.lineUserId!==user)return send(res,403,{error:'請先建立自己的祈福行程'});
+    if(journey.code)return send(res,200,{code:journey.code,status:db.bookings[journey.code]?.status});
     const alphabet='23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     do{item.code=Array.from({length:8},()=>alphabet[crypto.randomInt(alphabet.length)]).join('');}while(db.bookings[item.code]);
     if(item.bundleId!==bundle.id)return send(res,400,{error:'請選擇有效的禮包'});
     item.items=offerings.map(p=>({itemId:p.id,item:p.name,price:p.price,eligibleMerchantIds:p.options.map(o=>o.id),redeemedAt:null,redeemedBy:null}));
-    item.total=bundle.price;item.regularPrice=bundle.regularPrice;item.merchant='任一符合資格的合作示範店';item.paymentStatus='demo_no_charge';delete item.selections;
+    item.total=bundle.price;item.regularPrice=bundle.regularPrice;item.merchant='任一符合資格的合作示範店';item.paymentStatus='demo_no_charge';journey.code=item.code;
     db.bookings[item.code] = { ...item, status:'reserved', createdAt:new Date().toISOString() }; writeDb(db); return send(res, 201, { code:item.code, status:'reserved' });
   }
   if (req.method === 'POST' && req.url === '/api/redeem') {
